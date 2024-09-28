@@ -29,17 +29,16 @@ const (
 )
 
 var fallbackImagePath = "../img/NoImage.jpg"
-var fallBackImage Image
+var fallBackImageHash string
+var fallBackImage []byte
 
 func init() {
 	i, err := os.ReadFile(fallbackImagePath)
 	if err != nil {
 		panic(err)
 	}
-	fallBackImage = Image{
-		Data: i,
-		Hash: fmt.Sprintf("%x", sha256.Sum256(i)),
-	}
+	fallBackImage = i
+	fallBackImageHash = fmt.Sprintf("%x", sha256.Sum256(fallBackImage))
 }
 
 type UserModel struct {
@@ -99,8 +98,14 @@ type PostIconResponse struct {
 
 func getIconHandler(c echo.Context) error {
 	username := c.Param("username")
-	image := getImage(username)
-	return c.Blob(http.StatusOK, "image/jpeg", image.Data)
+	headerHash := c.Request().Header.Get("If-None-Match")
+	hash := getImageHash(username)
+
+	if headerHash != "" && headerHash == hash {
+		return c.NoContent(http.StatusNotModified)
+	} else {
+		return c.Blob(http.StatusOK, "image/jpeg", getImage(hash))
+	}
 }
 
 func postIconHandler(c echo.Context) error {
@@ -119,10 +124,7 @@ func postIconHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to decode the request body as json")
 	}
 
-	imageID := setImage(userName, Image{
-		Data: req.Image,
-		Hash: fmt.Sprintf("%x", sha256.Sum256(req.Image)),
-	})
+	imageID := setImage(userName, req.Image)
 
 	return c.JSON(http.StatusCreated, &PostIconResponse{
 		ID: imageID,
@@ -370,8 +372,6 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 		return User{}, err
 	}
 
-	image := getImage(userModel.Name)
-
 	user := User{
 		ID:          userModel.ID,
 		Name:        userModel.Name,
@@ -381,31 +381,37 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			ID:       themeModel.ID,
 			DarkMode: themeModel.DarkMode,
 		},
-		IconHash: image.Hash,
+		IconHash: getImageHash(userModel.Name),
 	}
 
 	return user, nil
 }
 
-type Image struct {
-	Data []byte
-	Hash string
-}
-
 // Key は user_name
-var imageCache = make(map[string]Image)
+var userNameToImageHash = make(map[string]string)
+var imageHashToImage = make(map[string][]byte)
 var imageNumber int64 = 1
 
-func getImage(userName string) *Image {
-	if img, ok := imageCache[userName]; ok {
-		return &img
+func getImageHash(userName string) string {
+	if hash, ok := userNameToImageHash[userName]; ok {
+		return hash
 	} else {
-		return &fallBackImage
+		return fallBackImageHash
 	}
 }
 
-func setImage(userName string, img Image) int64 {
-	imageCache[userName] = img
+func getImage(hash string) []byte {
+	if img, ok := imageHashToImage[hash]; ok {
+		return img
+	} else {
+		return fallBackImage
+	}
+}
+
+func setImage(userName string, img []byte) int64 {
+	hash := fmt.Sprintf("%x", sha256.Sum256(img))
+	userNameToImageHash[userName] = hash
+	imageHashToImage[hash] = img
 	imageNumber++
 	return imageNumber
 }
