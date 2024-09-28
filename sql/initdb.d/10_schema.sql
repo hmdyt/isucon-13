@@ -10,15 +10,6 @@ CREATE TABLE `users` (
   UNIQUE `uniq_user_name` (`name`)
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
--- プロフィール画像
-CREATE TABLE `icons` (
-  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  `user_id` BIGINT NOT NULL,
-  `image` LONGBLOB NOT NULL,
-  UNIQUE `uniq_user_id` (`user_id`)
-) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
-CREATE INDEX icons_user_id ON icons(`user_id`);
-
 -- ユーザごとのカスタムテーマ
 CREATE TABLE `themes` (
   `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,

@@ -1,5 +1,4 @@
 TRUNCATE TABLE themes;
-TRUNCATE TABLE icons;
 TRUNCATE TABLE reservation_slots;
 TRUNCATE TABLE livestream_viewers_history;
 TRUNCATE TABLE livecomment_reports;
@@ -12,7 +11,6 @@ TRUNCATE TABLE livestreams;
 TRUNCATE TABLE users;
 
 ALTER TABLE `themes` auto_increment = 1;
-ALTER TABLE `icons` auto_increment = 1;
 ALTER TABLE `reservation_slots` auto_increment = 1;
 ALTER TABLE `livestream_tags` auto_increment = 1;
 ALTER TABLE `livestream_viewers_history` auto_increment = 1;

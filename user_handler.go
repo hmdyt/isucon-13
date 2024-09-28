@@ -28,7 +28,19 @@ const (
 	bcryptDefaultCost        = bcrypt.MinCost
 )
 
-var fallbackImage = "../img/NoImage.jpg"
+var fallbackImagePath = "../img/NoImage.jpg"
+var fallBackImage Image
+
+func init() {
+	i, err := os.ReadFile(fallbackImagePath)
+	if err != nil {
+		panic(err)
+	}
+	fallBackImage = Image{
+		Data: i,
+		Hash: fmt.Sprintf("%x", sha256.Sum256(i)),
+	}
+}
 
 type UserModel struct {
 	ID             int64  `db:"id"`
@@ -104,21 +116,11 @@ func getIconHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user: "+err.Error())
 	}
 
-	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", user.ID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.File(fallbackImage)
-		} else {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user icon: "+err.Error())
-		}
-	}
-
-	return c.Blob(http.StatusOK, "image/jpeg", image)
+	image := getImage(user.ID)
+	return c.Blob(http.StatusOK, "image/jpeg", image.Data)
 }
 
 func postIconHandler(c echo.Context) error {
-	ctx := c.Request().Context()
-
 	if err := verifyUserSession(c); err != nil {
 		// echo.NewHTTPErrorが返っているのでそのまま出力
 		return err
@@ -134,32 +136,13 @@ func postIconHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to decode the request body as json")
 	}
 
-	tx, err := dbConn.BeginTxx(ctx, nil)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to begin transaction: "+err.Error())
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, "DELETE FROM icons WHERE user_id = ?", userID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete old user icon: "+err.Error())
-	}
-
-	rs, err := tx.ExecContext(ctx, "INSERT INTO icons (user_id, image) VALUES (?, ?)", userID, req.Image)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to insert new user icon: "+err.Error())
-	}
-
-	iconID, err := rs.LastInsertId()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get last inserted icon id: "+err.Error())
-	}
-
-	if err := tx.Commit(); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to commit: "+err.Error())
-	}
+	imageID := setImage(userID, Image{
+		Data: req.Image,
+		Hash: fmt.Sprintf("%x", sha256.Sum256(req.Image)),
+	})
 
 	return c.JSON(http.StatusCreated, &PostIconResponse{
-		ID: iconID,
+		ID: imageID,
 	})
 }
 
@@ -404,17 +387,7 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 		return User{}, err
 	}
 
-	var image []byte
-	if err := tx.GetContext(ctx, &image, "SELECT image FROM icons WHERE user_id = ?", userModel.ID); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return User{}, err
-		}
-		image, err = os.ReadFile(fallbackImage)
-		if err != nil {
-			return User{}, err
-		}
-	}
-	iconHash := sha256.Sum256(image)
+	image := getImage(userModel.ID)
 
 	user := User{
 		ID:          userModel.ID,
@@ -425,8 +398,31 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			ID:       themeModel.ID,
 			DarkMode: themeModel.DarkMode,
 		},
-		IconHash: fmt.Sprintf("%x", iconHash),
+		IconHash: image.Hash,
 	}
 
 	return user, nil
+}
+
+type Image struct {
+	Data []byte
+	Hash string
+}
+
+// Key は user_id
+var imageCache = make(map[int64]Image)
+var imageNumber int64 = 1
+
+func getImage(userID int64) *Image {
+	if img, ok := imageCache[userID]; ok {
+		return &img
+	} else {
+		return &fallBackImage
+	}
+}
+
+func setImage(userID int64, img Image) int64 {
+	imageCache[userID] = img
+	imageNumber++
+	return imageNumber
 }
