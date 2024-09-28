@@ -10,8 +10,9 @@ OUTFORMAT=count,method,1xx,2xx,3xx,4xx,5xx,uri,min,max,sum,avg,p99
 MATCHING_GROUPS=(
     "/api/livestream/\d+/reaction"
     "/api/livestream/\d+/report"
+    "/api/livestream/\d+/livecomment$"
+    "/api/livestream/\d+/livecomment\?limit"
     "/api/livestream/\d+/livecomment/\d+/report"
-    "/api/livestream/\d+/livecomment"
     "/api/livestream/\d+/enter"
     "/api/livestream/\d+/moderate"
     "/api/livestream/\d+/ngwords"
