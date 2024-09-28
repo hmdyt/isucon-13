@@ -98,25 +98,8 @@ type PostIconResponse struct {
 }
 
 func getIconHandler(c echo.Context) error {
-	ctx := c.Request().Context()
-
 	username := c.Param("username")
-
-	tx, err := dbConn.BeginTxx(ctx, nil)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to begin transaction: "+err.Error())
-	}
-	defer tx.Rollback()
-
-	var user UserModel
-	if err := tx.GetContext(ctx, &user, "SELECT * FROM users WHERE name = ?", username); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "not found user that has the given username")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get user: "+err.Error())
-	}
-
-	image := getImage(user.ID)
+	image := getImage(username)
 	return c.Blob(http.StatusOK, "image/jpeg", image.Data)
 }
 
@@ -129,14 +112,14 @@ func postIconHandler(c echo.Context) error {
 	// error already checked
 	sess, _ := session.Get(defaultSessionIDKey, c)
 	// existence already checked
-	userID := sess.Values[defaultUserIDKey].(int64)
+	userName := sess.Values[defaultUsernameKey].(string)
 
 	var req *PostIconRequest
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to decode the request body as json")
 	}
 
-	imageID := setImage(userID, Image{
+	imageID := setImage(userName, Image{
 		Data: req.Image,
 		Hash: fmt.Sprintf("%x", sha256.Sum256(req.Image)),
 	})
@@ -387,7 +370,7 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 		return User{}, err
 	}
 
-	image := getImage(userModel.ID)
+	image := getImage(userModel.Name)
 
 	user := User{
 		ID:          userModel.ID,
@@ -409,20 +392,20 @@ type Image struct {
 	Hash string
 }
 
-// Key は user_id
-var imageCache = make(map[int64]Image)
+// Key は user_name
+var imageCache = make(map[string]Image)
 var imageNumber int64 = 1
 
-func getImage(userID int64) *Image {
-	if img, ok := imageCache[userID]; ok {
+func getImage(userName string) *Image {
+	if img, ok := imageCache[userName]; ok {
 		return &img
 	} else {
 		return &fallBackImage
 	}
 }
 
-func setImage(userID int64, img Image) int64 {
-	imageCache[userID] = img
+func setImage(userName string, img Image) int64 {
+	imageCache[userName] = img
 	imageNumber++
 	return imageNumber
 }

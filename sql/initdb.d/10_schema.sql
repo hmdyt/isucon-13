@@ -9,6 +9,7 @@ CREATE TABLE `users` (
   `description` TEXT NOT NULL,
   UNIQUE `uniq_user_name` (`name`)
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+CREATE INDEX users_name ON users(`name`);
 
 -- ユーザごとのカスタムテーマ
 CREATE TABLE `themes` (
