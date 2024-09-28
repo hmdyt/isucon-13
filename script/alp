@@ -1,0 +1,32 @@
+#!/usr/bin/bash
+# Usage: ./alp [additional options]
+# Example: sudo cat /var/log/nginx/access.log | ./script/alp
+
+ALPSORT=sum
+ALPM="/api/isu/.+/icon,/api/isu/.+/graph,/api/isu/.+/condition,/api/isu/[-a-z0-9]+,/api/condition/[-a-z0-9]+,/api/catalog/.+,/api/condition\?,/isu/........-....-.+,/?jwt=.+"
+OUTFORMAT=count,method,1xx,2xx,3xx,4xx,5xx,uri,min,max,sum,avg,p99
+
+# /api/user/:id/hoge などの :id の部分が違っていても同じグループとして扱いたい場合に下にマッチを追加する
+MATCHING_GROUPS=(
+    "/api/livestream/\d+/reaction"
+    "/api/livestream/\d+/report"
+    "/api/livestream/\d+/livecomment/\d+/report"
+    "/api/livestream/\d+/livecomment"
+    "/api/livestream/\d+/enter"
+    "/api/livestream/\d+/moderate"
+    "/api/livestream/\d+/ngwords"
+    "/api/livestream/\d+/exit"
+    "/api/livestream/\d+/statistics"
+    "/api/user/.+/theme"
+    "/api/user/.+/livestream"
+    "/api/user/.+/me"
+    "/api/user/.+/statistics"
+    "/api/user/.+/icon"
+    "/api/user/[^/]+$"
+    "/api/livestream/search.*"
+)
+
+# カンマ区切りの文字列に変換
+MATCHING_GROUPS="$(IFS=,; echo "${MATCHING_GROUPS[*]}")"
+
+alp ltsv --nosave-pos --pos /tmp/alp.pos --sort $ALPSORT --reverse -o $OUTFORMAT -m $ALPM -q -m "$MATCHING_GROUPS" "$@"
