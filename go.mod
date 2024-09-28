@@ -1,6 +1,8 @@
 module github.com/isucon/isucon13/webapp/go
 
-go 1.21
+go 1.23
+
+toolchain go1.23.1
 
 require (
 	github.com/go-sql-driver/mysql v1.7.1
@@ -17,6 +19,7 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/gorilla/context v1.1.1 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
+	github.com/hashicorp/go-set/v3 v3.0.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect

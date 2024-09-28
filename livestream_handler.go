@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hashicorp/go-set/v3"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
@@ -494,22 +495,14 @@ func fillLivestreamResponse(ctx context.Context, tx *sqlx.Tx, livestreamModel Li
 		return Livestream{}, err
 	}
 
-	var livestreamTagModels []*LivestreamTagModel
-	if err := tx.SelectContext(ctx, &livestreamTagModels, "SELECT * FROM livestream_tags WHERE livestream_id = ?", livestreamModel.ID); err != nil {
-		return Livestream{}, err
+	livestreamToTags, err := getTags(ctx, tx, []LivestreamModel{livestreamModel})
+	if err != nil {
+		return Livestream{}, fmt.Errorf("failed to get tags: %w", err)
 	}
 
-	tags := make([]Tag, len(livestreamTagModels))
-	for i := range livestreamTagModels {
-		tagModel := TagModel{}
-		if err := tx.GetContext(ctx, &tagModel, "SELECT * FROM tags WHERE id = ?", livestreamTagModels[i].TagID); err != nil {
-			return Livestream{}, err
-		}
-
-		tags[i] = Tag{
-			ID:   tagModel.ID,
-			Name: tagModel.Name,
-		}
+	tags, ok := livestreamToTags[livestreamModel.ID]
+	if !ok {
+		return Livestream{}, errors.New("failed to get tags")
 	}
 
 	livestream := Livestream{
@@ -524,4 +517,152 @@ func fillLivestreamResponse(ctx context.Context, tx *sqlx.Tx, livestreamModel Li
 		EndAt:        livestreamModel.EndAt,
 	}
 	return livestream, nil
+}
+
+func fillLivestreamsResponse(ctx context.Context, tx *sqlx.Tx, livestreamModels []LivestreamModel) ([]Livestream, error) {
+	var ownerModels []UserModel
+	{
+		ownerIDs := set.New[int64](len(livestreamModels))
+		for _, livestreamModel := range livestreamModels {
+			ownerIDs.Insert(livestreamModel.UserID)
+		}
+		m, err := getUserModels(ctx, tx, ownerIDs.Slice())
+		if err != nil {
+			return nil, err
+		} else {
+			ownerModels = m
+		}
+	}
+
+	owners, err := fillUsersResponse(ctx, tx, ownerModels)
+	if err != nil {
+		return nil, err
+	}
+
+	ownersIDMap := make(map[int64]User, len(owners))
+	for _, owner := range owners {
+		ownersIDMap[owner.ID] = owner
+	}
+
+	livestreamToTags, err := getTags(ctx, tx, livestreamModels)
+
+	livestreams := make([]Livestream, len(livestreamModels))
+	for i, livestreamModel := range livestreamModels {
+		owner := ownersIDMap[livestreamModel.UserID]
+		tags, ok := livestreamToTags[livestreamModel.ID]
+		if !ok {
+			return nil, errors.New("failed to get tags")
+		}
+
+		livestreams[i] = Livestream{
+			ID:           livestreamModel.ID,
+			Owner:        owner,
+			Title:        livestreamModel.Title,
+			Tags:         tags,
+			Description:  livestreamModel.Description,
+			PlaylistUrl:  livestreamModel.PlaylistUrl,
+			ThumbnailUrl: livestreamModel.ThumbnailUrl,
+			StartAt:      livestreamModel.StartAt,
+			EndAt:        livestreamModel.EndAt,
+		}
+	}
+
+	return livestreams, nil
+}
+
+func getLivestreamTagsModels(ctx context.Context, tx *sqlx.Tx, livestreamIDs []int64) ([]LivestreamTagModel, error) {
+	if len(livestreamIDs) == 0 {
+		return []LivestreamTagModel{}, nil
+	}
+
+	query, params, err := sqlx.In("SELECT * FROM livestream_tags WHERE livestream_id IN (?)", livestreamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct IN query: %w", err)
+	}
+
+	var livestreamTagModels []LivestreamTagModel
+	if err := tx.SelectContext(ctx, &livestreamTagModels, query, params...); err != nil {
+		return nil, fmt.Errorf("failed to get livestreamTagModels: %w", err)
+	}
+
+	return livestreamTagModels, nil
+}
+
+func getTagModels(ctx context.Context, tx *sqlx.Tx, tagIDs []int64) ([]TagModel, error) {
+	if len(tagIDs) == 0 {
+		return []TagModel{}, nil
+	}
+
+	query, params, err := sqlx.In("SELECT * FROM tags WHERE id IN (?)", tagIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct IN query: %w", err)
+	}
+
+	var tagModels []TagModel
+	if err := tx.SelectContext(ctx, &tagModels, query, params...); err != nil {
+		return nil, fmt.Errorf("failed to get tagModels: %w", err)
+	}
+
+	return tagModels, nil
+}
+
+type LivestreamIDToTags map[int64][]Tag
+
+func getTags(ctx context.Context, tx *sqlx.Tx, livestreamModels []LivestreamModel) (LivestreamIDToTags, error) {
+	var livestreamTagModels []LivestreamTagModel
+	{
+		livestreamIDs := set.New[int64](len(livestreamModels))
+		for _, livestreamModel := range livestreamModels {
+			livestreamIDs.Insert(livestreamModel.ID)
+		}
+
+		m, err := getLivestreamTagsModels(ctx, tx, livestreamIDs.Slice())
+		if err != nil {
+			return nil, err
+		} else {
+			livestreamTagModels = m
+		}
+	}
+
+	var tagModels []TagModel
+	{
+		tagIDs := set.New[int64](len(livestreamTagModels))
+		for _, livestreamTagModel := range livestreamTagModels {
+			tagIDs.Insert(livestreamTagModel.TagID)
+		}
+
+		m, err := getTagModels(ctx, tx, tagIDs.Slice())
+		if err != nil {
+			return nil, err
+		} else {
+			tagModels = m
+		}
+	}
+
+	ret := make(LivestreamIDToTags, len(livestreamModels))
+	for _, lilivestreamModel := range livestreamModels {
+		ret[lilivestreamModel.ID] = make([]Tag, 0, 10)
+	}
+
+	{
+		tagIDToTag := make(map[int64]Tag, len(tagModels))
+		for _, tagModel := range tagModels {
+			tagIDToTag[tagModel.ID] = Tag{
+				ID:   tagModel.ID,
+				Name: tagModel.Name,
+			}
+		}
+
+		for _, livestreamTagModel := range livestreamTagModels {
+			tag := tagIDToTag[livestreamTagModel.TagID]
+			livestreamID := livestreamTagModel.LivestreamID
+
+			if _, ok := ret[livestreamID]; !ok {
+				ret[livestreamID] = make([]Tag, 0, 10)
+			}
+			ret[livestreamID] = append(ret[livestreamID], tag)
+		}
+	}
+
+	return ret, nil
 }

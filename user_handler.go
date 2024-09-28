@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/sessions"
+	"github.com/hashicorp/go-set/v3"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
@@ -385,6 +386,68 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 	}
 
 	return user, nil
+}
+
+func getThemeModels(ctx context.Context, tx *sqlx.Tx, userIDs []int64) ([]ThemeModel, error) {
+	if len(userIDs) == 0 {
+		return []ThemeModel{}, nil
+	}
+
+	query, args, err := sqlx.In("SELECT * FROM themes WHERE user_id IN (?)", userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate IN query: %w", err)
+	}
+
+	var themeModels []ThemeModel
+	if err := tx.SelectContext(ctx, &themeModels, query, args...); err != nil {
+		return nil, fmt.Errorf("failed to get themes: %w", err)
+	}
+
+	return themeModels, nil
+}
+
+func fillUsersResponse(ctx context.Context, tx *sqlx.Tx, userModels []UserModel) ([]User, error) {
+	var themeModels []ThemeModel
+	{
+		userIDs := set.New[int64](len(userModels))
+		for _, userModel := range userModels {
+			userIDs.Insert(userModel.ID)
+		}
+
+		m, err := getThemeModels(ctx, tx, userIDs.Slice())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get theme models: %w", err)
+		} else {
+			themeModels = m
+		}
+	}
+
+	userIDToTheme := make(map[int64]ThemeModel, len(themeModels))
+	for _, themeModel := range themeModels {
+		userIDToTheme[themeModel.UserID] = themeModel
+	}
+
+	users := make([]User, len(userModels))
+	for i, userModel := range userModels {
+		themeModel, ok := userIDToTheme[userModel.ID]
+		if !ok {
+			return nil, fmt.Errorf("theme not found for user_id=%d", userModel.ID)
+		}
+
+		users[i] = User{
+			ID:          userModel.ID,
+			Name:        userModel.Name,
+			DisplayName: userModel.DisplayName,
+			Description: userModel.Description,
+			Theme: Theme{
+				ID:       themeModel.ID,
+				DarkMode: themeModel.DarkMode,
+			},
+			IconHash: getImageHash(userModel.Name),
+		}
+	}
+
+	return users, nil
 }
 
 // Key は user_name
